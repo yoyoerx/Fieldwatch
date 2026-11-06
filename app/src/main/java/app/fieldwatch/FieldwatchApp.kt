@@ -98,6 +98,8 @@ class FieldwatchApp : Application() {
         private set
     lateinit var places: PlaceStore
         private set
+    /** Experimental address-change chains. Memory only. */
+    val rotations = app.fieldwatch.domain.RotationLinker()
     lateinit var trusted: TrustedNetworkStore
         private set
     lateinit var cells: CellStore

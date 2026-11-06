@@ -312,6 +312,9 @@ class ScanService : LifecycleService() {
                         alertStops = settings.placeAlertStops,
                     )
                     if (crossed.isNotEmpty()) app.announcePlaces(crossed)
+                    if (settings.placeWide) {
+                        app.rotations.ingest(seen, System.currentTimeMillis(), fix?.first, fix?.second)
+                    }
                 }
                 if (settings.loggingEnabled) {
                     val toLog = seen.filter { it.hitCount <= 1 || it.hitCount % 25 == 0 }.take(16)

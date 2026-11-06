@@ -50,5 +50,14 @@ internal object PlaceLines {
             "{n} of them are routine: places you went on two or more days.",
             LanguageSlot.BODY,
         ),
+        en("reports.rotation.title", "Linked across address changes (experimental)", LanguageSlot.CONTROL),
+        en(
+            "reports.rotation.note",
+            "Follows one Bluetooth radio across its address changes. A guess. Your own gear shows here too. Clears when the app restarts.",
+            LanguageSlot.BODY,
+        ),
+        en("reports.rotation.empty", "Nothing linked has stayed with you for 30 minutes and 2 km.", LanguageSlot.BODY),
+        en("reports.rotation.line", "{n} address changes · {min} min · {km} km with you", LanguageSlot.BODY),
+        en("reports.rotation.hide", "Hide", LanguageSlot.CONTROL),
     )
 }

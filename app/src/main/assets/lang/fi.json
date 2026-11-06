@@ -1830,6 +1830,11 @@
     "reports.places.known.tag": "Known",
     "reports.places.known.clear": "Not known",
     "reports.places.oneoff": "{n} one-off",
-    "reports.places.routine": "{n} of them are routine: places you went on two or more days."
+    "reports.places.routine": "{n} of them are routine: places you went on two or more days.",
+    "reports.rotation.title": "Linked across address changes (experimental)",
+    "reports.rotation.note": "Follows one Bluetooth radio across its address changes. A guess. Your own gear shows here too. Clears when the app restarts.",
+    "reports.rotation.empty": "Nothing linked has stayed with you for 30 minutes and 2 km.",
+    "reports.rotation.line": "{n} address changes · {min} min · {km} km with you",
+    "reports.rotation.hide": "Hide"
   }
 }

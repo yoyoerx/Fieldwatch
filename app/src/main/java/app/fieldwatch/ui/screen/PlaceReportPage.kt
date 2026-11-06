@@ -99,6 +99,7 @@ internal fun PlaceReportPage(
         )
         rows to PlaceReport.summary(rows, records, state.watchlist, since, now, zone)
     }
+    val chains = remember(tick, settings.placeWide) { vm.rotationChains() }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FieldwatchFilterChip(
@@ -169,6 +170,7 @@ internal fun PlaceReportPage(
         }
         if (rows.isEmpty()) {
             Note(LanguageText.text("reports.places.empty"))
+            RotationSection(chains, vm)
             return@Column
         }
         val focus = PlaceReport.newest(rows)
@@ -192,6 +194,7 @@ internal fun PlaceReportPage(
                 onFamiliar = { vm.markPlaceRadiosFamiliar(listOf(row.deviceKey), !row.familiar) },
             )
         }
+        RotationSection(chains, vm)
     }
 }
 
@@ -299,6 +302,64 @@ private fun PlaceReportRow(
                 modifier = Modifier.padding(start = 4.dp, top = 2.dp),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+    }
+}
+
+/** Experimental chains that followed one radio across address changes. */
+@Composable
+private fun RotationSection(chains: List<app.fieldwatch.domain.RotationLinker.Chain>, vm: FieldwatchViewModel) {
+    var hiddenNow by remember { mutableStateOf(emptySet<Long>()) }
+    val shown = chains.filter { it.id !in hiddenNow }
+    Column(Modifier.padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(
+            LanguageText.text("reports.rotation.title"),
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Note(LanguageText.text("reports.rotation.note"))
+        if (shown.isEmpty()) {
+            Note(LanguageText.text("reports.rotation.empty"))
+            return@Column
+        }
+        val clock = remember { java.text.SimpleDateFormat("HH:mm", java.util.Locale.US) }
+        shown.forEach { chain ->
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 1.dp,
+            ) {
+                Row(
+                    Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(chain.label, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            LanguageText.text(
+                                "reports.rotation.line",
+                                mapOf(
+                                    "n" to chain.links.toString(),
+                                    "min" to ((chain.lastAt - chain.firstAt) / 60_000L).toString(),
+                                    "km" to "%.1f".format(java.util.Locale.US, chain.withYouM / 1000.0),
+                                ),
+                            ),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(
+                            "${clock.format(java.util.Date(chain.firstAt))} – ${clock.format(java.util.Date(chain.lastAt))}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    TextButton(onClick = {
+                        vm.hideRotationChain(chain.id)
+                        hiddenNow = hiddenNow + chain.id
+                    }) { Text(LanguageText.text("reports.rotation.hide")) }
+                }
+            }
         }
     }
 }

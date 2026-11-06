@@ -2693,6 +2693,15 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
         viewModelScope.launch { streetsForDevice(device) }
     }
 
+    /** Address-change chains for the places report. Empty unless wide Places is on. */
+    fun rotationChains(): List<app.fieldwatch.domain.RotationLinker.Chain> {
+        val settings = app.config.settings
+        if (!settings.placeWatch || !settings.placeWide) return emptyList()
+        return app.rotations.chains(System.currentTimeMillis())
+    }
+
+    fun hideRotationChain(id: Long) = app.rotations.hide(id)
+
     /** Place records for Reports. Empty when Places is off, so the page does not list a hidden file. */
     fun placeRecords(): List<PlaceMemory.Record> {
         if (!app.config.settings.placeWatch) return emptyList()
