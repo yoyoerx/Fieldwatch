@@ -15,6 +15,7 @@ import android.telephony.TelephonyManager
 import app.fieldwatch.domain.CellField
 import app.fieldwatch.domain.CellGen
 import app.fieldwatch.domain.CellIdentity
+import app.fieldwatch.domain.CellNeighbor
 import app.fieldwatch.domain.CellReading
 
 /**
@@ -29,6 +30,10 @@ object CellRadio {
         val parsed = registered?.let { parse(it) }
         val identity = parsed?.identity()
         val empty = if (registered == null || parsed == null) emptyList() else parsed.emptyFields()
+        // Neighbors rarely carry a full identity. Generation, PCI, channel, and signal are enough.
+        val neighbors = infos.filter { !it.isRegistered }
+            .mapNotNull { runCatching { parse(it) }.getOrNull() }
+            .map { CellNeighbor(it.gen, it.pci, it.channel, it.signal) }
         return CellReading(
             registered = registered != null,
             generation = parsed?.gen,
@@ -40,6 +45,7 @@ object CellRadio {
             emptyFields = if (identity != null) emptyList() else empty,
             neighborCount = infos.count { !it.isRegistered },
             secondSimRegistered = secondSim(context, telephony),
+            neighbors = neighbors,
         )
     }
 

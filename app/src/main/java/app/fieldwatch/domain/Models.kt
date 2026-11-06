@@ -1472,6 +1472,8 @@ data class AppSettings(
     val cellWarnNew: Boolean = true,
     /** Warn when a 4G or 5G place drops to 2G or 3G. */
     val cellWarnDrop: Boolean = true,
+    /** Warn when the serving cell scores as suspect, at any place. */
+    val cellWarnSuspect: Boolean = true,
     /**
      * Days after a place is opened. 0 is none: the first visit is the only quiet one.
      * Missing JSON is 3, the same start trusted networks use.

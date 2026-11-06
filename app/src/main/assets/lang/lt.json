@@ -1772,6 +1772,25 @@
     "update.failed.title": "Naujinio įdiegti nepavyko",
     "update.failed.body": "Failo iš GitHub įdiegti nepavyko. Programa šiame telefone nepasikeitė.",
     "update.allow.title": "Leisti diegimus iš Fieldwatch",
-    "update.allow.body": "Android paklausia vieną kartą. Tada grįžk ir vėl paliesk Atnaujinti."
+    "update.allow.body": "Android paklausia vieną kartą. Tada grįžk ir vėl paliesk Atnaujinti.",
+    "cell.warn.suspect": "Warn on a suspect cell",
+    "cell.warn.suspect.note": "Signs of a fake base station, moving or still.",
+    "cell.sentence.suspect": "This phone camped on a cell that looks wrong.",
+    "cell.body.suspect": "Signs seen with fake base stations are under Details. Fieldwatch cannot tell the cause.",
+    "cell.score": "Suspicion score",
+    "cell.reasons": "Reasons",
+    "cell.flag.test.network": "Test or private network code",
+    "cell.flag.bad.identity": "Reserved or out-of-range id",
+    "cell.flag.pci.changed": "Known cell id, different PCI",
+    "cell.flag.channel.changed": "Known cell id, different channel",
+    "cell.flag.area.changed": "Known cell id, different area code",
+    "cell.flag.area.churn": "3+ area codes in minutes while still",
+    "cell.flag.forced.down": "2G or 3G while 4G or 5G is heard",
+    "cell.flag.plain.2g": "2G: the network is not authenticated",
+    "cell.flag.unlisted.network": "Network code not in the operator list",
+    "cell.flag.odd.channel": "Channel outside every known band",
+    "cell.flag.loud.new": "New cell, much louder than usual",
+    "cell.flag.close.new": "New cell, zero timing advance",
+    "cell.flag.lone": "No neighbor cells on 4G or 5G"
   }
 }

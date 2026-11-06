@@ -28,7 +28,14 @@ enum class CellGen {
     fun high(): Boolean = this == LTE || this == NR
 }
 
-enum class CellKind { NEW, DROP2, DROP3 }
+enum class CellKind {
+    NEW, DROP2, DROP3, SUSPECT;
+
+    fun drop(): Boolean = this == DROP2 || this == DROP3
+
+    /** Kinds keyed to one cell: they age out when the phone leaves that cell, and Dismiss holds that cell. */
+    fun perCell(): Boolean = this == NEW || this == SUSPECT
+}
 
 /** One group on the full place list. A place is in a single group. */
 enum class CellPlaceBand { HERE, TODAY, WEEK, OLDER }
@@ -100,6 +107,9 @@ data class CellEpisode(
     val startedAt: Long = 0L,
     val updatedAt: Long = 0L,
     val endedAt: Long = 0L,
+    /** SUSPECT only: CellFlag names seen during this episode, and the highest score. */
+    val flags: List<String> = emptyList(),
+    val score: Int = 0,
 ) {
     val open: Boolean get() = endedAt <= 0L
 }
@@ -122,6 +132,12 @@ data class CellBook(
     val dropClearSince: Long = 0L,
     val nextPlace: Long = 1L,
     val nextEpisode: Long = 1L,
+    /** Every tower this phone camped on while the watch was on. See CellSuspect. */
+    val seen: List<CellSeen> = emptyList(),
+    /** Area codes heard during the current still stretch. */
+    val areaHits: List<CellAreaHit> = emptyList(),
+    /** This phone has reported a neighbor cell at least once. */
+    val sawNeighbors: Boolean = false,
 ) {
     companion object {
         const val FORMAT = "fieldwatch-cells"
@@ -141,6 +157,7 @@ data class CellReading(
     val neighborCount: Int = 0,
     /** Null when the phone did not return a second SIM. */
     val secondSimRegistered: Boolean? = null,
+    val neighbors: List<CellNeighbor> = emptyList(),
 )
 
 data class CellFix(
@@ -157,12 +174,15 @@ data class CellSwitches(
     val warnDrop: Boolean = true,
     /** Days after the place opened. 0 is none: the first visit is the only quiet one. */
     val learnDays: Int = 3,
+    /** Warn when the serving cell scores as suspect. See CellSuspect. */
+    val warnSuspect: Boolean = false,
 )
 
 data class CellStep(
     val book: CellBook,
     val fresh: List<CellEpisode> = emptyList(),
     val reading: CellReading = CellReading(),
+    val verdict: CellVerdict = CellVerdict(),
 )
 
 @Serializable
@@ -176,6 +196,7 @@ data class CellMark(
     val cell: String = "",
     val signal: Int? = null,
     val timingAdvance: Int? = null,
+    val flags: List<String> = emptyList(),
 )
 
 object CellWatch {
@@ -318,43 +339,91 @@ object CellWatch {
         }
         val usable = usable(fix)
         val still = usable && still(next, fix)
-        if (usable) next = moveAnchor(next, fix, still)
-        if (!usable) return CellStep(trim(next), emptyList(), reading)
         val fresh = ArrayList<CellEpisode>(2)
+        val verdict = CellSuspect.judge(next, reading, still, now)
+        next = considerSuspect(next, reading, verdict, still, usable, fix, switches, now, fresh)
+        if (usable) next = moveAnchor(next, fix, still)
+        if (!usable) return CellStep(trim(next), fresh, reading, verdict)
         val index = nearest(next, fix)
         if (index < 0) {
             next = endVisits(next, now)
             if (still && reading.identity != null) next = openPlace(next, fix, reading, now)
-            return CellStep(trim(next), fresh, reading)
+            return CellStep(trim(next), fresh, reading, verdict)
         }
         next = endOtherVisits(next, index, now)
         val here = nearest(next, fix)
-        if (here < 0) return CellStep(trim(next), fresh, reading)
+        if (here < 0) return CellStep(trim(next), fresh, reading, verdict)
         next = markInside(next, here, now)
         next = considerDrop(next, here, reading, switches, now, fresh)
-        if (!still || reading.identity == null) return CellStep(trim(next), fresh, reading)
+        if (!still || reading.identity == null) return CellStep(trim(next), fresh, reading, verdict)
         val place = next.places[here]
         if (!place.baselined) {
             next = replace(next, here, store(place, reading, now))
-            return CellStep(trim(next), fresh, reading)
+            return CellStep(trim(next), fresh, reading, verdict)
         }
         if (learning(place, switches.learnDays, now)) {
             next = learnQuiet(next, here, reading, switches, now)
-            return CellStep(trim(next), fresh, reading)
+            return CellStep(trim(next), fresh, reading, verdict)
         }
         next = considerNew(next, here, reading, switches, now, fresh)
-        return CellStep(trim(next), fresh, reading)
+        return CellStep(trim(next), fresh, reading, verdict)
+    }
+
+    /** Scored on every poll, still or moving, inside a place or not. Needs only a full identity. */
+    private fun considerSuspect(
+        book: CellBook,
+        reading: CellReading,
+        verdict: CellVerdict,
+        still: Boolean,
+        usable: Boolean,
+        fix: CellFix,
+        switches: CellSwitches,
+        now: Long,
+        fresh: MutableList<CellEpisode>,
+    ): CellBook {
+        val identity = reading.identity ?: return book
+        val next = CellSuspect.remember(book, reading, still, now)
+        if (!switches.warnSuspect || !verdict.alarming) return next
+        if (next.holds.any { it.key == identity.key() }) return next
+        val names = verdict.flags.map { it.name }
+        val open = next.episodes.find { it.open && it.kind == CellKind.SUSPECT && it.identity.key() == identity.key() }
+        if (open != null) {
+            val touched = touchEpisode(next, open.id, reading, now)
+            return touched.copy(
+                episodes = touched.episodes.map { episode ->
+                    if (episode.id != open.id) episode
+                    else episode.copy(flags = (episode.flags + names).distinct(), score = maxOf(episode.score, verdict.score))
+                },
+            )
+        }
+        val index = if (usable) nearest(next, fix) else -1
+        val placeId = if (index >= 0) next.places[index].id else ""
+        val episode = episode(next, CellKind.SUSPECT, placeId, reading, now).copy(flags = names, score = verdict.score)
+        fresh += episode
+        return next.copy(episodes = next.episodes + episode, nextEpisode = next.nextEpisode + 1)
     }
 
     fun showing(book: CellBook): CellEpisode? =
         book.episodes.filter { it.open }
-            .sortedWith(compareBy<CellEpisode> { it.startedAt }.thenBy { if (it.kind == CellKind.NEW) 1 else 0 })
+            // A suspect cell goes first. The rest keep the oldest-first order, a drop before a new cell.
+            .sortedWith(
+                compareBy<CellEpisode> { if (it.kind == CellKind.SUSPECT) 0 else 1 }
+                    .thenBy { it.startedAt }
+                    .thenBy { kindOrder(it.kind) },
+            )
             .firstOrNull()
+
+    private fun kindOrder(kind: CellKind): Int = when (kind) {
+        CellKind.SUSPECT -> 0
+        CellKind.DROP2, CellKind.DROP3 -> 1
+        CellKind.NEW -> 2
+    }
 
     fun learn(book: CellBook, episodeId: Long, now: Long): CellBook {
         val episode = book.episodes.find { it.open && it.id == episodeId } ?: return book
         val index = book.places.indexOfFirst { it.id == episode.placeId }
         var next = if (index < 0) book else replace(book, index, store(book.places[index], episode.reading(), now))
+        if (episode.kind == CellKind.SUSPECT) next = CellSuspect.accept(next, episode, now)
         next = endEpisode(next, episodeId, now)
         next = next.copy(holds = next.holds.filter { it.key != episode.identity.key() })
         val place = next.places.find { it.id == episode.placeId }
@@ -365,7 +434,7 @@ object CellWatch {
     fun dismiss(book: CellBook, episodeId: Long, now: Long): CellBook {
         val episode = book.episodes.find { it.open && it.id == episodeId } ?: return book
         var next = endEpisode(book, episodeId, now)
-        next = if (episode.kind == CellKind.NEW) {
+        next = if (episode.kind.perCell()) {
             val holds = next.holds.filter { it.key != episode.identity.key() } + CellHold(episode.identity.key(), now)
             next.copy(holds = holds)
         } else {
@@ -390,7 +459,7 @@ object CellWatch {
 
     fun marks(book: CellBook): List<CellMark> = book.episodes.map { it.toMark() }
 
-    fun diagRows(reading: CellReading): List<Pair<String, String>> {
+    fun diagRows(reading: CellReading, verdict: CellVerdict? = null): List<Pair<String, String>> {
         val empty = reading.emptyFields.joinToString(", ") { field ->
             LanguageText.text(
                 when (field) {
@@ -412,6 +481,11 @@ object CellWatch {
             LanguageText.text("diag.cell.empty") to empty,
             LanguageText.text("diag.cell.neighbors") to reading.neighborCount.coerceAtLeast(0).toString(),
             LanguageText.text("diag.cell.second") to second,
+        ) + listOfNotNull(
+            verdict?.let { v ->
+                val names = v.flags.joinToString(", ") { it.name.lowercase() }
+                LanguageText.text("cell.score") to if (names.isEmpty()) "0" else "${v.score} ($names)"
+            },
         )
     }
 
@@ -440,6 +514,7 @@ object CellWatch {
         if (cell.isNotBlank()) appendLine("${LanguageText.text("cell.cell")}: $cell")
         if (mark.signal != null) appendLine("${LanguageText.text("cell.signal")}: ${mark.signal} dBm")
         if (mark.timingAdvance != null) appendLine("${LanguageText.text("cell.timing")}: ${mark.timingAdvance}")
+        CellCopy.reasons(mark.flags)?.let { appendLine("${LanguageText.text("cell.reasons")}: $it") }
     }.trimEnd()
 
     private fun masked(value: String, demo: Boolean): String {
@@ -451,6 +526,7 @@ object CellWatch {
         when (kind) {
             "2g" -> "cell.sentence.2g"
             "3g" -> "cell.sentence.3g"
+            "suspect" -> "cell.sentence.suspect"
             else -> "cell.sentence.new"
         },
     )
@@ -473,7 +549,7 @@ object CellWatch {
         if (!identity.gen.low()) return book
         val place = book.places[index]
         if (!place.baselined || !onlyHigh(place) || !switches.warnDrop || book.dropHeld) return book
-        val open = book.episodes.find { it.open && it.kind != CellKind.NEW }
+        val open = book.episodes.find { it.open && it.kind.drop() }
         if (open != null) return touchEpisode(book, open.id, reading, now)
         val episode = episode(book, dropKind(identity.gen), place.id, reading, now)
         fresh += episode
@@ -506,6 +582,8 @@ object CellWatch {
             return replace(book, index, store(place, reading, now))
         }
         if (book.holds.any { it.key == identity.key() }) return book
+        // A suspect episode on this cell already says more than a new-cell warning would.
+        if (book.episodes.any { it.open && it.kind == CellKind.SUSPECT && it.identity.key() == identity.key() }) return book
         val open = book.episodes.find { it.open && it.kind == CellKind.NEW && it.identity.key() == identity.key() }
         if (open != null) return touchEpisode(book, open.id, reading, now)
         val episode = episode(book, CellKind.NEW, place.id, reading, now)
@@ -655,6 +733,7 @@ object CellWatch {
             CellKind.NEW -> "new"
             CellKind.DROP2 -> "2g"
             CellKind.DROP3 -> "3g"
+            CellKind.SUSPECT -> "suspect"
         },
         gen = identity.gen.band(),
         plmn = identity.plmn,
@@ -662,6 +741,7 @@ object CellWatch {
         cell = identity.cell.toString(),
         signal = signal,
         timingAdvance = timingAdvance,
+        flags = flags,
     )
 
     private fun touchEpisode(book: CellBook, id: Long, reading: CellReading, now: Long): CellBook {
@@ -700,7 +780,7 @@ object CellWatch {
         val current = reading.identity?.key()
         var changed = false
         val episodes = book.episodes.map { episode ->
-            val gone = episode.open && episode.kind == CellKind.NEW &&
+            val gone = episode.open && episode.kind.perCell() &&
                 episode.identity.key() != current &&
                 now - episode.updatedAt >= GONE_MS
             if (!gone) episode else {
@@ -712,7 +792,7 @@ object CellWatch {
     }
 
     private fun recover(book: CellBook, reading: CellReading, now: Long): CellBook {
-        val openDrop = book.episodes.any { it.open && it.kind != CellKind.NEW }
+        val openDrop = book.episodes.any { it.open && it.kind.drop() }
         if (!openDrop && !book.dropHeld) {
             return if (book.dropClearSince == 0L) book else book.copy(dropClearSince = 0L)
         }
@@ -720,7 +800,7 @@ object CellWatch {
         val since = if (book.dropClearSince == 0L) now else book.dropClearSince
         if (now - since < GONE_MS) return book.copy(dropClearSince = since)
         val episodes = book.episodes.map { episode ->
-            if (episode.open && episode.kind != CellKind.NEW) episode.copy(endedAt = now) else episode
+            if (episode.open && episode.kind.drop()) episode.copy(endedAt = now) else episode
         }
         return book.copy(episodes = episodes, dropHeld = false, dropClearSince = 0L)
     }
@@ -845,6 +925,7 @@ object CellCopy {
             CellKind.NEW -> "cell.sentence.new"
             CellKind.DROP2 -> "cell.sentence.2g"
             CellKind.DROP3 -> "cell.sentence.3g"
+            CellKind.SUSPECT -> "cell.sentence.suspect"
         },
     )
 
@@ -853,6 +934,7 @@ object CellCopy {
             CellKind.NEW -> "cell.body.new"
             CellKind.DROP2 -> "cell.body.2g"
             CellKind.DROP3 -> "cell.body.3g"
+            CellKind.SUSPECT -> "cell.body.suspect"
         },
     )
 
@@ -866,7 +948,22 @@ object CellCopy {
         line("cell.pci", episode.pci?.toString().orEmpty())
         line("cell.channel", episode.channel?.toString().orEmpty())
         line("cell.band", episode.channel?.let { CellBand.label(episode.identity.gen, it) }.orEmpty())
+        line("cell.signal", episode.signal?.let { "$it dBm" }.orEmpty())
+        line("cell.timing", episode.timingAdvance?.toString().orEmpty())
+        if (episode.flags.isNotEmpty()) {
+            line("cell.score", episode.score.toString())
+            line("cell.reasons", reasons(episode.flags).orEmpty())
+        }
     }.trimEnd()
+
+    /** One line per sign, strongest first. Unknown names from a newer build are skipped. */
+    fun flagTexts(names: List<String>): List<String> = names
+        .mapNotNull { name -> CellFlag.entries.find { it.name == name } }
+        .distinct()
+        .sortedByDescending { it.weight }
+        .map { LanguageText.text(it.textKey()) }
+
+    fun reasons(names: List<String>): String? = flagTexts(names).takeIf { it.isNotEmpty() }?.joinToString("; ")
 
     private fun StringBuilder.line(key: String, value: String) {
         if (value.isBlank()) return

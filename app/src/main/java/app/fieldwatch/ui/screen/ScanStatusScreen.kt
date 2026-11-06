@@ -67,6 +67,7 @@ fun ScanStatusScreen(
     val app = context.applicationContext as FieldwatchApp
     val gnss by app.gnss.reading.collectAsStateWithLifecycle()
     val cell by app.cells.reading.collectAsStateWithLifecycle()
+    val cellVerdict by app.cells.verdict.collectAsStateWithLifecycle()
     val gnssProfile by app.gnssProfile.profile.collectAsStateWithLifecycle()
     val report = ScanStatus.report(
         radio = state.scanRadio,
@@ -75,7 +76,7 @@ fun ScanStatusScreen(
         radiosOnAir = state.wifiNow + state.bleNow,
         gnssRows = gnss.diagRows + GnssCalibration.diagRows(gnssProfile),
         tak = takDiag(state, app),
-        cellRows = CellWatch.diagRows(cell),
+        cellRows = CellWatch.diagRows(cell, cellVerdict),
     )
     Scaffold(
         contentWindowInsets = NestedTabInsets,

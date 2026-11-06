@@ -6,6 +6,7 @@ import app.fieldwatch.domain.CellMark
 import app.fieldwatch.domain.CellReading
 import app.fieldwatch.domain.CellStep
 import app.fieldwatch.domain.CellSwitches
+import app.fieldwatch.domain.CellVerdict
 import app.fieldwatch.domain.CellWatch
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
@@ -30,6 +31,8 @@ class CellStore(private val file: File, private val scope: CoroutineScope) {
     val bookFlow: StateFlow<CellBook> = _book.asStateFlow()
     private val _reading = MutableStateFlow(CellReading())
     val reading: StateFlow<CellReading> = _reading.asStateFlow()
+    private val _verdict = MutableStateFlow(CellVerdict())
+    val verdict: StateFlow<CellVerdict> = _verdict.asStateFlow()
 
     fun load() {
         val text = runCatching { file.readText() }.getOrNull() ?: return
@@ -58,6 +61,7 @@ class CellStore(private val file: File, private val scope: CoroutineScope) {
             _book.value = book
         }
         _reading.value = reading
+        _verdict.value = step.verdict
         step
     }
 

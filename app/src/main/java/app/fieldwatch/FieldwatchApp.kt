@@ -886,6 +886,7 @@ class FieldwatchApp : Application() {
                     warnNew = settings.cellWarnNew,
                     warnDrop = settings.cellWarnDrop,
                     learnDays = settings.cellLearnDays,
+                    warnSuspect = settings.cellWarnSuspect,
                 ),
                 now,
             )

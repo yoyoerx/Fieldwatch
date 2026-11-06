@@ -297,6 +297,10 @@ private fun CellWatchCards(
             onChange { it.copy(cellWarnDrop = on) }
         }
         Note(LanguageText.text("cell.warn.drop.note"))
+        SwitchRow(LanguageText.text("cell.warn.suspect"), settings.cellWarnSuspect) { on ->
+            onChange { it.copy(cellWarnSuspect = on) }
+        }
+        Note(LanguageText.text("cell.warn.suspect.note"))
     }
     SectionCard(LanguageText.text("trusted.reach")) {
         Note(LanguageText.text("cell.reach.note"))
