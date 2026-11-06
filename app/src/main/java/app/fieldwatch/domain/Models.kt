@@ -1821,6 +1821,22 @@ object MacUtil {
         return (first and 0x02) != 0 && (first and 0x01) == 0
     }
 
+    /**
+     * Random address or not. The local bit is the Wi-Fi rule; a Bluetooth address marks its type
+     * elsewhere, so for BLE the type the stack reported wins (Android 15+). With no type reported,
+     * the Wi-Fi rule is the only guess left, and it is right about half the time for BLE.
+     */
+    fun isRandomFor(kind: RadioKind, mac: String, addressType: String?): Boolean {
+        if (kind == RadioKind.BLE) {
+            when {
+                addressType.equals("Public", ignoreCase = true) -> return false
+                addressType.equals("Random", ignoreCase = true) -> return true
+                addressType.equals("Anonymous", ignoreCase = true) -> return true
+            }
+        }
+        return isRandomized(mac)
+    }
+
     /** Local bit of the first octet. The address was assigned locally, whether or not the group bit is set. */
     fun isLocallyAdministered(mac: String): Boolean {
         val first = normalize(mac).substringBefore(":").toIntOrNull(16) ?: return false

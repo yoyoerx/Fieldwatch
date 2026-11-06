@@ -106,7 +106,7 @@ class DeviceStore(
                 channel = observation.channel,
                 frequencyMhz = observation.frequencyMhz,
                 vendor = OuiLookup.vendor(mac),
-                randomized = MacUtil.isRandomized(mac),
+                randomized = MacUtil.isRandomFor(observation.kind, mac, observation.facts.addressType),
                 hiddenSsid = observation.hiddenSsid,
                 serviceUuids = observation.serviceUuids,
                 manufacturerId = observation.manufacturerId,
@@ -145,10 +145,12 @@ class DeviceStore(
             } else {
                 (existing.serviceUuids + observation.serviceUuids).distinct()
             }
+            val facts = existing.facts.merge(observation.facts)
             existing.copy(
                 name = observation.name.ifBlank { existing.name },
                 rssi = if (measured) observation.rssi else existing.rssi,
                 vendor = existing.vendor ?: OuiLookup.vendor(mac),
+                randomized = MacUtil.isRandomFor(existing.kind, mac, facts.addressType),
                 rssiMin = if (measured) {
                     if (Rssi.measured(existing.rssiMin)) minOf(existing.rssiMin, observation.rssi)
                     else observation.rssi
@@ -179,7 +181,7 @@ class DeviceStore(
                 gpsTrail = gpsAppend(existing.gpsTrail, observation),
                 gone = false,
                 vendorIeOuis = mergeIes(existing.vendorIeOuis, observation.vendorIeOuis),
-                facts = existing.facts.merge(observation.facts),
+                facts = facts,
                 fastPairPairing = existing.fastPairPairing || FastPair.pairingAdvertised(observation.facts),
             )
         }
