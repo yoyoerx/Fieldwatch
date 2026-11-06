@@ -534,6 +534,26 @@ fun SettingsScreen(
                     mapOf("gps" to LanguageText.text("ui.tag.detections.gps")),
                 ),
             )
+            if (settings.placeWatch) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(LanguageText.text("place.wide"), Modifier.weight(1f))
+                    FieldwatchSwitch(settings.placeWide, { on -> vm.updateSettings { it.copy(placeWide = on) } })
+                }
+                Note(LanguageText.text("place.wide.note"))
+                Text(LanguageText.text("place.alert"), style = MaterialTheme.typography.labelLarge)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(0, 2, 3, 4, 5).forEach { stops ->
+                        FieldwatchFilterChip(
+                            selected = settings.placeAlertStops == stops,
+                            onClick = { vm.updateSettings { it.copy(placeAlertStops = stops) } },
+                            label = {
+                                Text(if (stops == 0) LanguageText.text("place.alert.off") else stops.toString())
+                            },
+                        )
+                    }
+                }
+                Note(LanguageText.text("place.alert.note"))
+            }
             }
             SectionCard(LanguageText.text("settings.topic.maps")) {
             Row(verticalAlignment = Alignment.CenterVertically) {

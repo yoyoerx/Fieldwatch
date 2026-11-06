@@ -42,6 +42,41 @@ object RadioBookmarks {
             if (row.alert) key else null
         }.toSet()
 
+    /** Device keys marked Known, not mine. A row also marked Mine counts as Mine. */
+    fun familiarKeys(watchlist: List<WatchTarget>): Set<String> =
+        watchlist.mapNotNull { row ->
+            val key = row.deviceKey ?: return@mapNotNull null
+            if (row.familiar && !row.mine) key else null
+        }.toSet()
+
+    /** Known, not mine. Turning it on clears Mine on that row; the two do not stack. */
+    fun setFamiliar(
+        watchlist: List<WatchTarget>,
+        deviceKey: String,
+        on: Boolean,
+        suggestLabel: String,
+    ): List<WatchTarget> {
+        val i = watchlist.indexOfFirst { it.deviceKey == deviceKey }
+        if (!on) {
+            if (i < 0) return watchlist
+            return watchlist.mapIndexed { idx, row -> if (idx == i) row.copy(familiar = false) else row }
+        }
+        if (i < 0) {
+            return watchlist + WatchTarget(
+                id = UUID.randomUUID().toString(),
+                deviceKey = deviceKey,
+                label = clip(suggestLabel),
+                alert = false,
+                familiar = true,
+            )
+        }
+        val row = watchlist[i]
+        val label = if (row.label.trim().isEmpty()) clip(suggestLabel) else row.label
+        return watchlist.mapIndexed { idx, it ->
+            if (idx == i) it.copy(label = label, familiar = true, mine = false) else it
+        }
+    }
+
     /** Device keys marked mine. Fleet rows are not included. */
     fun mineKeys(watchlist: List<WatchTarget>): Set<String> =
         watchlist.mapNotNull { row ->

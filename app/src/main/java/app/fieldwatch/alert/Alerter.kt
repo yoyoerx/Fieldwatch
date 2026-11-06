@@ -234,6 +234,41 @@ class Alerter(private val context: Context) {
     }
 
     /**
+     * A radio reached the stops warning. One note per radio; tapping it opens that radio.
+     * [body] has no coordinates.
+     */
+    fun placeAlert(title: String, body: String, deviceKey: String, phrase: String?, beep: Boolean) {
+        ensurePlaceChannel()
+        val id = (deviceKey.hashCode() xor PLACE_NOTE_SALT) and 0x7FFFFFFF
+        val pending = PendingIntent.getActivity(
+            context,
+            id,
+            Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                putExtra(EXTRA_DEVICE_KEY, deviceKey)
+            },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val note = NotificationCompat.Builder(context, PLACE_CHANNEL)
+            .setSmallIcon(R.drawable.ic_stat_fieldwatch)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setAutoCancel(true)
+            .setSilent(true)
+            .setContentIntent(pending)
+            .build()
+        manager.notify(id, note)
+        if (beep) beep(holdFocus = phrase.isNullOrBlank())
+        if (!phrase.isNullOrBlank()) {
+            prepareVoice()
+            queueVoice(phrase, afterBeep = beep)
+        }
+    }
+
+    /**
      * A known mapped sensor ahead. Speaks [text], posts it on the layer channel, and pulses once.
      * [text] has no coordinates. This does not use the watchlist beep.
      */
@@ -716,6 +751,17 @@ class Alerter(private val context: Context) {
         )
     }
 
+    private fun ensurePlaceChannel() {
+        if (Build.VERSION.SDK_INT < 26) return
+        if (manager.getNotificationChannel(PLACE_CHANNEL) != null) return
+        manager.createNotificationChannel(
+            NotificationChannel(PLACE_CHANNEL, LanguageText.text("ui.places.label"), NotificationManager.IMPORTANCE_HIGH).apply {
+                description = LanguageText.text("place.alert.note")
+                setSound(null, null)
+            },
+        )
+    }
+
     private fun ensureFlockChannel() {
         if (Build.VERSION.SDK_INT < 26) return
         if (manager.getNotificationChannel(FLOCK_CHANNEL) != null) return
@@ -750,6 +796,8 @@ class Alerter(private val context: Context) {
         const val FLOCK_CHANNEL = "fieldwatch_map_layers"
         const val TRUSTED_CHANNEL = "fieldwatch_trusted"
         const val CELL_CHANNEL = "fieldwatch_cell"
+        const val PLACE_CHANNEL = "fieldwatch_places"
+        private const val PLACE_NOTE_SALT = 0x504C4143
         private const val GNSS_NOTE_ID = 71_001
         private const val TRUSTED_NOTE_ID = 71_002
         private const val CELL_NOTE_ID = 71_003

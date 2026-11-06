@@ -2661,6 +2661,18 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
     fun isMine(deviceKey: String): Boolean =
         app.config.watchlist.any { it.deviceKey == deviceKey && it.mine }
 
+    fun isFamiliar(deviceKey: String): Boolean =
+        app.config.watchlist.any { it.deviceKey == deviceKey && it.familiar && !it.mine }
+
+    fun setRadioFamiliar(device: Sighting, on: Boolean) {
+        viewModelScope.launch {
+            val suggest = RadioBookmarks.suggestLabel(device, device.fleetIds.map { fleetName(it) })
+            app.config.update { cfg ->
+                cfg.copy(watchlist = RadioBookmarks.setFamiliar(cfg.watchlist, device.key, on, suggest))
+            }
+        }
+    }
+
     /** Place lines for this radio. Empty when Places is off or the address cannot be kept. */
     fun placeLines(device: Sighting, streets: Map<String, String> = emptyMap()): List<String> {
         val settings = app.config.settings
@@ -3792,20 +3804,32 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
 
     /** Opens a places-report radio. A radio that has left the live list still opens. */
     fun openPlaceRadio(deviceKey: String): Boolean {
-        val live = app.devices.devices.value.firstOrNull { it.key == deviceKey }
-        if (live != null) {
-            select(live)
-            return true
-        }
-        val held = app.sits.sighting(deviceKey)
-        if (held != null) {
-            select(if (held.gone) held else held.copy(gone = true))
-            return true
-        }
-        val record = app.places.snapshot().firstOrNull { it.deviceKey == deviceKey } ?: return false
-        val remembered = PlaceReport.remembered(record) ?: return false
-        select(remembered)
+        val device = placeSighting(deviceKey) ?: return false
+        select(device)
         return true
+    }
+
+    /** Mark or clear places-report radios as Known, not mine, live or not. */
+    fun markPlaceRadiosFamiliar(deviceKeys: Collection<String>, on: Boolean) {
+        for (key in deviceKeys) {
+            val device = placeSighting(key) ?: continue
+            setRadioFamiliar(device, on)
+        }
+    }
+
+    /** Mark places-report radios Mine, live or not. */
+    fun markPlaceRadiosMine(deviceKeys: Collection<String>) {
+        for (key in deviceKeys) {
+            val device = placeSighting(key) ?: continue
+            setRadioMine(device, true)
+        }
+    }
+
+    private fun placeSighting(deviceKey: String): Sighting? {
+        app.devices.devices.value.firstOrNull { it.key == deviceKey }?.let { return it }
+        app.sits.sighting(deviceKey)?.let { held -> return if (held.gone) held else held.copy(gone = true) }
+        val record = app.places.snapshot().firstOrNull { it.deviceKey == deviceKey } ?: return null
+        return PlaceReport.remembered(record)
     }
 
     fun suggestedExportName(): String {

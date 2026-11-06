@@ -15,14 +15,21 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import kotlinx.coroutines.delay
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -33,14 +40,18 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.fieldwatch.domain.LanguageText
+import app.fieldwatch.domain.PlaceMemory
 import app.fieldwatch.domain.PlaceReport
+import app.fieldwatch.ui.component.FieldwatchActionButton
+import app.fieldwatch.ui.component.FieldwatchFilterChip
 import app.fieldwatch.ui.FieldwatchUi
 import app.fieldwatch.ui.FieldwatchViewModel
 import java.time.ZoneId
 
 /**
- * Radios heard at two or more places in the last 7 days.
+ * Radios heard at two or more places, today or in the last 7 days.
  * The map is where this phone was. Each radio keeps one color on the map and in the list.
+ * Rows are recomputed every 30 seconds, not on every scan.
  */
 @Composable
 internal fun PlaceReportPage(
@@ -58,18 +69,97 @@ internal fun PlaceReportPage(
     LaunchedEffect(settings.onlineLookup, settings.demoMode) {
         vm.refreshPlaceReportStreets()
     }
-    val rows = PlaceReport.rows(
-        records = vm.placeRecords(),
-        devices = state.devices,
-        fleets = state.fleets,
-        watchlist = state.watchlist,
-        now = System.currentTimeMillis(),
-        zone = ZoneId.systemDefault(),
-        demo = settings.demoMode,
-        streets = if (settings.demoMode || !settings.onlineLookup) emptyMap() else streets,
-    )
+    var today by rememberSaveable { mutableStateOf(false) }
+    var showFamiliar by rememberSaveable { mutableStateOf(false) }
+    var tick by remember { mutableIntStateOf(0) }
+    var askMine by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(30_000)
+            tick++
+        }
+    }
+    val zone = remember { ZoneId.systemDefault() }
+    val shownStreets = if (settings.demoMode || !settings.onlineLookup) emptyMap() else streets
+    val (rows, summary) = remember(tick, today, showFamiliar, state.watchlist, state.fleets, settings.demoMode, shownStreets) {
+        val now = System.currentTimeMillis()
+        val since = if (today) PlaceReport.todayStart(now, zone) else now - PlaceMemory.WINDOW_MS
+        val records = vm.placeRecords()
+        val rows = PlaceReport.rows(
+            records = records,
+            devices = state.devices,
+            fleets = state.fleets,
+            watchlist = state.watchlist,
+            now = now,
+            zone = zone,
+            demo = settings.demoMode,
+            streets = shownStreets,
+            since = since,
+            showFamiliar = showFamiliar,
+        )
+        rows to PlaceReport.summary(rows, records, state.watchlist, since, now, zone)
+    }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Note(LanguageText.text("reports.places.blurb"))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FieldwatchFilterChip(
+                selected = today,
+                onClick = { today = true },
+                label = { Text(LanguageText.text("reports.places.today")) },
+            )
+            FieldwatchFilterChip(
+                selected = !today,
+                onClick = { today = false },
+                label = { Text(LanguageText.text("reports.places.week")) },
+            )
+            if (summary.familiar > 0 || showFamiliar) {
+                FieldwatchFilterChip(
+                    selected = showFamiliar,
+                    onClick = { showFamiliar = !showFamiliar },
+                    label = {
+                        Text(LanguageText.text("reports.places.known.show", mapOf("n" to summary.familiar.toString())))
+                    },
+                )
+            }
+        }
+        Note(LanguageText.text(if (today) "reports.places.today.blurb" else "reports.places.blurb"))
+        Text(
+            LanguageText.text(
+                "reports.places.summary",
+                mapOf("n" to summary.radios.toString(), "stops" to summary.stops.toString()),
+            ),
+            style = MaterialTheme.typography.labelLarge,
+        )
+        if (summary.routine > 0) {
+            Note(LanguageText.text("reports.places.routine", mapOf("n" to summary.routine.toString())))
+        }
+        val likely = rows.filter { it.likelyMine }
+        if (likely.isNotEmpty()) {
+            Note(LanguageText.text("reports.places.mine.note"))
+            FieldwatchActionButton(
+                onClick = { askMine = true },
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text(LanguageText.text("reports.places.mine.all", mapOf("n" to likely.size.toString()))) }
+        }
+        if (askMine) {
+            AlertDialog(
+                onDismissRequest = { askMine = false },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(LanguageText.text("reports.places.mine.ask", mapOf("n" to likely.size.toString())))
+                        likely.forEach { Text("• ${it.title}", style = MaterialTheme.typography.bodySmall) }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        askMine = false
+                        vm.markPlaceRadiosMine(likely.map { it.deviceKey })
+                    }) { Text(LanguageText.text("reports.places.mine")) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { askMine = false }) { Text(LanguageText.text("language.cancel")) }
+                },
+            )
+        }
         if (settings.demoMode) {
             Text(
                 LanguageText.text("reports.places.private"),
@@ -95,13 +185,23 @@ internal fun PlaceReportPage(
             )
         }
         rows.forEach { row ->
-            PlaceReportRow(row) { onOpen(row.deviceKey) }
+            PlaceReportRow(
+                row,
+                onOpen = { onOpen(row.deviceKey) },
+                onMine = { vm.markPlaceRadiosMine(listOf(row.deviceKey)) },
+                onFamiliar = { vm.markPlaceRadiosFamiliar(listOf(row.deviceKey), !row.familiar) },
+            )
         }
     }
 }
 
 @Composable
-private fun PlaceReportRow(row: PlaceReport.Row, onOpen: () -> Unit) {
+private fun PlaceReportRow(
+    row: PlaceReport.Row,
+    onOpen: () -> Unit,
+    onMine: () -> Unit,
+    onFamiliar: () -> Unit,
+) {
     val color = Color(row.color)
     Surface(
         modifier = Modifier
@@ -144,6 +244,23 @@ private fun PlaceReportRow(row: PlaceReport.Row, onOpen: () -> Unit) {
                         color = color,
                     )
                 }
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Tag(LanguageText.text(kindKey(row.kind)), MaterialTheme.colorScheme.secondaryContainer)
+                    if (row.likelyMine) {
+                        Tag(LanguageText.text("reports.places.likely"), MaterialTheme.colorScheme.tertiaryContainer)
+                    }
+                    if (row.familiar) {
+                        Tag(LanguageText.text("reports.places.known.tag"), MaterialTheme.colorScheme.surfaceVariant)
+                    }
+                }
+                Text(
+                    metrics(row),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 if (row.address.isNotEmpty()) {
                     Text(
                         row.address,
@@ -167,6 +284,14 @@ private fun PlaceReportRow(row: PlaceReport.Row, onOpen: () -> Unit) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+                Row(Modifier.padding(top = 2.dp)) {
+                    TextButton(onClick = onMine) {
+                        Text(LanguageText.text("reports.places.mine"))
+                    }
+                    TextButton(onClick = onFamiliar) {
+                        Text(LanguageText.text(if (row.familiar) "reports.places.known.clear" else "place.known"))
+                    }
+                }
             }
             Icon(
                 Icons.AutoMirrored.Filled.KeyboardArrowRight,
@@ -177,6 +302,36 @@ private fun PlaceReportRow(row: PlaceReport.Row, onOpen: () -> Unit) {
         }
     }
 }
+
+@Composable
+private fun Tag(text: String, color: Color) {
+    Surface(shape = RoundedCornerShape(6.dp), color = color) {
+        Text(
+            text,
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
+            style = MaterialTheme.typography.labelSmall,
+        )
+    }
+}
+
+private fun kindKey(kind: PlaceReport.Kind): String = when (kind) {
+    PlaceReport.Kind.TAG -> "reports.places.kind.tag"
+    PlaceReport.Kind.HOTSPOT -> "reports.places.kind.hotspot"
+    PlaceReport.Kind.BLE -> "reports.places.kind.ble"
+    PlaceReport.Kind.DRONE -> "reports.places.kind.drone"
+}
+
+/** Stops, days, average signal, and score on one line. */
+private fun metrics(row: PlaceReport.Row): String = buildList {
+    add(LanguageText.text("reports.places.count", mapOf("n" to row.count.toString())))
+    if (row.oneOff > 0) add(LanguageText.text("reports.places.oneoff", mapOf("n" to row.oneOff.toString())))
+    add(
+        if (row.days == 1) LanguageText.text("reports.places.days.one")
+        else LanguageText.text("reports.places.days", mapOf("n" to row.days.toString())),
+    )
+    row.avgRssi?.let { add(LanguageText.text("reports.places.avg", mapOf("dbm" to it.toString()))) }
+    add(LanguageText.text("reports.places.score", mapOf("n" to row.score.toString())))
+}.joinToString(" · ")
 
 @Composable
 private fun PlaceVisits(visits: List<PlaceReport.Visit>) {

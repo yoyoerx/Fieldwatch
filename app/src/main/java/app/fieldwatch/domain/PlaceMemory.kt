@@ -16,7 +16,9 @@ import java.util.Locale
  *
  * A fleet name is not an identity. Rotating BLE addresses are skipped unless
  * the radio already carries a stable Remote ID. Ordinary Wi-Fi and unmatched
- * Bluetooth stay out unless [accept] is asked to include them.
+ * Bluetooth stay out unless [accept] is asked to include them ([wide]).
+ * A Wi-Fi access point counts only at stops [WIFI_SEPARATION_M] apart, so a
+ * router heard from the next street is still one place.
  */
 object PlaceMemory {
     const val SEPARATION_M = 100.0
@@ -31,8 +33,19 @@ object PlaceMemory {
     const val MIN_PLACES = 2
     const val CONFIRM_HITS = 2
     const val MAX_PLACES = 8
-    const val MAX_RECORDS = 400
+    const val MAX_RECORDS = 3000
+    const val MAX_DAYS = 8
+    const val WIFI_SEPARATION_M = 500.0
+    /** A hear this close to a stop already on the record joins it. GPS indoors wanders past 100 m. */
+    const val STOP_MOVE_M = 250.0
+    /** Longer than a phone's 15-minute address rotation. An address this old is not rotating. */
+    const val STABLE_MS = 20 * 60_000L
     const val FORMAT = "fieldwatch-places"
+
+    const val KIND_TAG = "tag"
+    const val KIND_DRONE = "drone"
+    const val KIND_WIFI = "wifi"
+    const val KIND_BLE = "ble"
 
     @Serializable
     data class Place(
@@ -42,6 +55,9 @@ object PlaceMemory {
         val lastAt: Long,
         val count: Int,
         val name: String? = null,
+        /** Sum and count of signal readings at this stop, for the average. */
+        val rssiSum: Long = 0L,
+        val rssiHits: Int = 0,
     )
 
     @Serializable
@@ -56,6 +72,12 @@ object PlaceMemory {
         val localDay: Long = Long.MIN_VALUE,
         /** Last name worth showing after this radio leaves the live list. */
         val label: String = "",
+        /** Local epoch days this radio was heard, newest last, up to [MAX_DAYS]. */
+        val days: List<Long> = emptyList(),
+        /** One of the KIND_ values. Blank on files from before it was stored. */
+        val kind: String = "",
+        /** Local epoch day the stops warning last fired for this radio. */
+        val alertedDay: Long = Long.MIN_VALUE,
     )
 
     data class Hear(
@@ -68,6 +90,8 @@ object PlaceMemory {
         val sitLabel: String?,
         val localDay: Long,
         val label: String = "",
+        val rssi: Int? = null,
+        val kind: String = "",
     )
 
     /**
@@ -79,17 +103,46 @@ object PlaceMemory {
         names: Map<String, String>,
         mineKeys: Set<String>,
         generic: Boolean = false,
+        wide: Boolean = false,
     ): String? {
         if (device.key in mineKeys) return null
         val uas = device.payloadUasId?.trim().orEmpty()
         if (uas.isNotEmpty()) return "rid:$uas"
         if (device.kind == RadioKind.WIFI) {
-            return if (generic) "wifi:${device.mac}" else null
+            // An access point keeps its BSSID, even a locally administered one.
+            return if (generic || wide) "wifi:${device.mac}" else null
         }
-        if (MacUtil.isRandomized(device.mac)) return null
         val finder = TrackerMatch.kind(device, names) == TrackerMatch.Kind.FINDER
-        if (!finder && !generic) return null
+        if (!finder && !generic && !wide) return null
+        // A public address, or a random one that has already outlived a rotation. A tag away from
+        // its owner holds its address for a day, so it is kept from its twentieth minute on.
+        if (!stableBle(device)) return null
         return "ble:${device.mac}"
+    }
+
+    /** Public address, or one heard unchanged for longer than a rotation. Unknown type falls back to the old rule. */
+    fun stableBle(device: Sighting): Boolean {
+        val type = device.facts.addressType
+        if (type.equals("Public", ignoreCase = true)) return true
+        if (device.lastSeen - device.firstSeen >= STABLE_MS) return true
+        val reported = type.equals("Random", ignoreCase = true) || type.equals("Anonymous", ignoreCase = true)
+        return !reported && !MacUtil.isRandomized(device.mac)
+    }
+
+    /** What sort of radio an accepted id is. */
+    fun kindOf(id: String, device: Sighting, names: Map<String, String>): String = when {
+        id.startsWith("rid:") -> KIND_DRONE
+        id.startsWith("wifi:") -> KIND_WIFI
+        TrackerMatch.kind(device, names) == TrackerMatch.Kind.FINDER -> KIND_TAG
+        else -> KIND_BLE
+    }
+
+    /** Stored kind, or a guess for files written before it was stored. Those only held tags and drones. */
+    fun kindOf(record: Record): String = when {
+        record.kind.isNotBlank() -> record.kind
+        record.id.startsWith("rid:") -> KIND_DRONE
+        record.id.startsWith("wifi:") -> KIND_WIFI
+        else -> KIND_TAG
     }
 
     /**
@@ -120,6 +173,7 @@ object PlaceMemory {
             prev == null || prev.places.isEmpty() -> listOf(openPlace(hear))
             else -> {
                 val near = nearest(prev.places, hear.lat, hear.lon)
+                    ?: nearest(prev.places, hear.lat, hear.lon, STOP_MOVE_M)
                 when {
                     near != null -> cap(prev.places.map { if (it == near) touch(it, hear) else it })
                     gap >= QUIET_MS -> cap(prev.places + openPlace(hear))
@@ -137,7 +191,31 @@ object PlaceMemory {
             sitId = hear.sitId,
             localDay = hear.localDay,
             label = keptLabel(prev?.label, hear.label),
+            days = addDay(prev?.days.orEmpty(), hear.localDay),
+            kind = hear.kind.ifBlank { prev?.kind.orEmpty() },
+            alertedDay = prev?.alertedDay ?: Long.MIN_VALUE,
         )
+    }
+
+    private fun addDay(days: List<Long>, day: Long): List<Long> {
+        if (day == Long.MIN_VALUE || day in days) return days
+        return (days + day).sorted().takeLast(MAX_DAYS)
+    }
+
+    /** Stops since [since], with the Wi-Fi spread rule. */
+    fun placesSince(record: Record, since: Long): List<Place> = counted(record, since)
+
+    /** Distinct local days heard on or after [sinceDay]. */
+    fun daysSince(record: Record, sinceDay: Long): Int {
+        val days = record.days.count { it >= sinceDay }
+        return if (days > 0) days else if (record.localDay >= sinceDay) 1 else 0
+    }
+
+    /** Average signal over [places], or null when none was stored. */
+    fun averageRssi(places: List<Place>): Int? {
+        val hits = places.sumOf { it.rssiHits }
+        if (hits <= 0) return null
+        return (places.sumOf { it.rssiSum } / hits).toInt()
     }
 
     fun prune(record: Record, now: Long): Record? {
@@ -147,9 +225,9 @@ object PlaceMemory {
         return if (places.size == record.places.size) record else record.copy(places = places)
     }
 
-    fun placeCount(record: Record, now: Long): Int = counted(record, now).size
+    fun placeCount(record: Record, now: Long): Int = counted(record, now - WINDOW_MS).size
 
-    fun placesInWindow(record: Record, now: Long): List<Place> = counted(record, now)
+    fun placesInWindow(record: Record, now: Long): List<Place> = counted(record, now - WINDOW_MS)
 
     fun detailLines(
         record: Record,
@@ -158,7 +236,7 @@ object PlaceMemory {
         demo: Boolean = false,
         streets: Map<String, String> = emptyMap(),
     ): List<String> {
-        val counted = counted(record, now).sortedBy { it.firstAt }
+        val counted = counted(record, now - WINDOW_MS).sortedBy { it.firstAt }
         val lines = ArrayList<String>(counted.size + 2)
         if (counted.size >= MIN_PLACES) {
             val today = counted.all { onSameDay(it.firstAt, now, zone) && onSameDay(it.lastAt, now, zone) }
@@ -256,14 +334,20 @@ object PlaceMemory {
         }
     }
 
-    private fun counted(record: Record, now: Long): List<Place> {
-        val cut = now - WINDOW_MS
-        return record.places.filter { it.count >= CONFIRM_HITS && it.lastAt >= cut }
+    private fun counted(record: Record, cut: Long): List<Place> {
+        val confirmed = record.places.filter { it.count >= CONFIRM_HITS && it.lastAt >= cut }
+        if (!record.id.startsWith("wifi:") || confirmed.size < 2) return confirmed
+        // Keep the busiest stops first. A Wi-Fi stop within the spread of one kept is the same router.
+        val kept = ArrayList<Place>(confirmed.size)
+        for (place in confirmed.sortedByDescending { it.count }) {
+            if (kept.none { Geo.meters(it.lat, it.lon, place.lat, place.lon) < WIFI_SEPARATION_M }) kept += place
+        }
+        return confirmed.filter { it in kept }
     }
 
-    private fun nearest(places: List<Place>, lat: Double, lon: Double): Place? {
+    private fun nearest(places: List<Place>, lat: Double, lon: Double, within: Double = SEPARATION_M): Place? {
         var best: Place? = null
-        var bestM = SEPARATION_M
+        var bestM = within
         for (place in places) {
             val meters = Geo.meters(place.lat, place.lon, lat, lon)
             if (meters < bestM) {
@@ -281,13 +365,23 @@ object PlaceMemory {
         lastAt = hear.at,
         count = 1,
         name = blankToNull(hear.sitLabel),
+        rssiSum = usableRssi(hear.rssi)?.toLong() ?: 0L,
+        rssiHits = if (usableRssi(hear.rssi) != null) 1 else 0,
     )
 
-    private fun touch(place: Place, hear: Hear): Place = place.copy(
-        lastAt = hear.at,
-        count = place.count + 1,
-        name = place.name ?: blankToNull(hear.sitLabel),
-    )
+    private fun touch(place: Place, hear: Hear): Place {
+        val rssi = usableRssi(hear.rssi)
+        return place.copy(
+            lastAt = hear.at,
+            count = place.count + 1,
+            name = place.name ?: blankToNull(hear.sitLabel),
+            rssiSum = place.rssiSum + (rssi ?: 0),
+            rssiHits = place.rssiHits + if (rssi != null) 1 else 0,
+        )
+    }
+
+    /** 127 and 0 are "not available" on some stacks. */
+    private fun usableRssi(rssi: Int?): Int? = rssi?.takeIf { it in -130..-1 }
 
     /**
      * Keep the latest [MAX_PLACES] confirmed stops. One unconfirmed stop may sit

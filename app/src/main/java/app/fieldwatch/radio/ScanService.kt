@@ -302,13 +302,16 @@ class ScanService : LifecycleService() {
                 app.sits.ingest(seen, fleets, app.config.watchlist)
                 considerTrusted(app, tagged)
                 if (settings.placeWatch && settings.tagLocation) {
-                    app.places.hear(
+                    val crossed = app.places.hear(
                         seen,
                         fleets,
                         app.config.watchlist,
                         app.sits.openSitId(),
                         app.sits.clusterLabel(),
+                        wide = settings.placeWide,
+                        alertStops = settings.placeAlertStops,
                     )
+                    if (crossed.isNotEmpty()) app.announcePlaces(crossed)
                 }
                 if (settings.loggingEnabled) {
                     val toLog = seen.filter { it.hitCount <= 1 || it.hitCount % 25 == 0 }.take(16)

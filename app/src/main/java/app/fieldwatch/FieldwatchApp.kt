@@ -899,6 +899,31 @@ class FieldwatchApp : Application() {
         }
     }
 
+    /** One note per radio that reached the stops warning today. Beep and voice only for the first. */
+    fun announcePlaces(records: List<app.fieldwatch.domain.PlaceMemory.Record>) {
+        if (!::alerter.isInitialized || !::config.isInitialized) return
+        val settings = config.settings
+        val now = System.currentTimeMillis()
+        val since = app.fieldwatch.domain.PlaceReport.todayStart(now, java.time.ZoneId.systemDefault())
+        records.forEachIndexed { index, record ->
+            val stops = app.fieldwatch.domain.PlaceMemory.placesSince(record, since).size.toString()
+            val name = record.label.ifBlank {
+                app.fieldwatch.domain.MacUtil.screenMac(
+                    app.fieldwatch.domain.RadioBookmarks.parseKey(record.deviceKey)?.second.orEmpty(),
+                    settings.demoMode,
+                )
+            }.ifBlank { record.deviceKey }
+            val title = LanguageText.text("place.alert.title", mapOf("n" to stops))
+            alerter.placeAlert(
+                title = title,
+                body = LanguageText.text("place.alert.body", mapOf("name" to name, "n" to stops)),
+                deviceKey = record.deviceKey,
+                phrase = if (index == 0 && settings.alertVoice) title else null,
+                beep = index == 0,
+            )
+        }
+    }
+
     /** Beep and speak only when an episode becomes the dialog. A shade repost stays quiet. */
     fun announceCell() {
         if (!::cells.isInitialized || !::config.isInitialized || !::alerter.isInitialized) return

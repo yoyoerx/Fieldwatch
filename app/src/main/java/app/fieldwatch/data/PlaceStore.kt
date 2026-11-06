@@ -27,6 +27,9 @@ class PlaceStore(private val file: File) {
     private val lock = Any()
     private val records = HashMap<String, PlaceMemory.Record>()
     private var dirty = false
+    /** Counters and signal moved, nothing a page would miss. Written at most every [SOFT_FLUSH_MS]. */
+    private var soft = false
+    private var lastFlushAt = 0L
     private var generation = 0
     private var cacheMinute = Long.MIN_VALUE
     private var cacheGen = -1
@@ -57,24 +60,36 @@ class PlaceStore(private val file: File) {
         }
     }
 
+    /**
+     * Note one batch. Returns records that just reached [alertStops] stops today
+     * and have not warned today. Zero turns that off.
+     */
     fun hear(
         devices: List<Sighting>,
         fleets: List<Fleet>,
         watchlist: List<WatchTarget>,
         sitId: String?,
         sitLabel: String?,
-    ) {
-        if (devices.isEmpty()) return
+        wide: Boolean = false,
+        alertStops: Int = 0,
+    ): List<PlaceMemory.Record> {
+        if (devices.isEmpty()) return emptyList()
         val names = HashMap<String, String>(fleets.size)
         for (fleet in fleets) names[fleet.id] = fleet.name
         val custom = RadioBookmarks.labels(watchlist)
         val mine = RadioBookmarks.mineKeys(watchlist)
+        val familiar = RadioBookmarks.familiarKeys(watchlist)
         val zone = ZoneId.systemDefault()
         val now = System.currentTimeMillis()
+        val today = PlaceMemory.localDate(now, zone)
+        val todayStart = today.atStartOfDay(zone).toInstant().toEpochMilli()
+        val todayDay = today.toEpochDay()
+        val crossed = ArrayList<PlaceMemory.Record>()
         synchronized(lock) {
             var changed = false
+            var structural = false
             for (device in devices) {
-                val id = PlaceMemory.accept(device, names, mine) ?: continue
+                val id = PlaceMemory.accept(device, names, mine, wide = wide) ?: continue
                 val at = if (device.lastSeen > 0L) device.lastSeen else now
                 val day = PlaceMemory.localDate(at, zone).toEpochDay()
                 val sigNames = device.fleetIds.mapNotNull { names[it] }
@@ -92,28 +107,38 @@ class PlaceStore(private val file: File) {
                             sitLabel = sitLabel,
                             localDay = day,
                             label = PlaceMemory.heardLabel(device, sigNames, custom[device.key]),
+                            rssi = device.rssi,
+                            kind = PlaceMemory.kindOf(id, device, names),
                         ),
                     ),
                     now,
-                )
+                )?.let { record ->
+                    val due = alertStops > 0 && record.alertedDay != todayDay &&
+                        device.key !in familiar &&
+                        PlaceMemory.placesSince(record, todayStart).size >= alertStops
+                    if (due) record.copy(alertedDay = todayDay).also { crossed += it } else record
+                }
                 if (next == null) {
                     if (prev != null) {
                         records.remove(id)
                         changed = true
+                        structural = true
                     }
                     continue
                 }
                 if (next != prev) {
                     records[next.id] = next
                     changed = true
+                    if (!structural && isStructural(prev, next)) structural = true
                 }
             }
             if (changed) {
                 trimLocked(now)
-                dirty = true
+                if (structural) dirty = true else soft = true
                 generation++
             }
         }
+        return crossed
     }
 
     fun linesFor(
@@ -177,9 +202,13 @@ class PlaceStore(private val file: File) {
     fun snapshot(): List<PlaceMemory.Record> = synchronized(lock) { records.values.toList() }
 
     fun flush() {
+        val now = System.currentTimeMillis()
         val copy = synchronized(lock) {
-            if (!dirty) return
+            val due = dirty || (soft && now - lastFlushAt >= SOFT_FLUSH_MS)
+            if (!due) return
             dirty = false
+            soft = false
+            lastFlushAt = now
             records.values.toList()
         }
         try {
@@ -198,13 +227,33 @@ class PlaceStore(private val file: File) {
         }
     }
 
+    /** Over the cap, a radio at one stop goes before a radio at two or more. Oldest first within each. */
     private fun trimLocked(now: Long) {
         if (records.size <= PlaceMemory.MAX_RECORDS) return
-        val drop = records.values.sortedBy { it.lastHeardAt }
+        val drop = records.values
+            .sortedWith(
+                compareBy<PlaceMemory.Record> { PlaceMemory.placeCount(it, now) >= PlaceMemory.MIN_PLACES }
+                    .thenBy { it.lastHeardAt },
+            )
             .take(records.size - PlaceMemory.MAX_RECORDS)
         for (record in drop) {
             if (now - record.lastHeardAt >= 0L) records.remove(record.id)
         }
+    }
+
+    /** A new radio, a new or newly confirmed stop, a new day, or a warning. */
+    private fun isStructural(prev: PlaceMemory.Record?, next: PlaceMemory.Record): Boolean {
+        if (prev == null) return true
+        if (prev.places.size != next.places.size) return true
+        if (prev.days != next.days || prev.alertedDay != next.alertedDay) return true
+        if (prev.returnAt != next.returnAt || prev.label != next.label) return true
+        val confirmedBefore = prev.places.count { it.count >= PlaceMemory.CONFIRM_HITS }
+        return confirmedBefore != next.places.count { it.count >= PlaceMemory.CONFIRM_HITS }
+    }
+
+    private companion object {
+        /** Wide Places changes on nearly every scan. Counters wait up to five minutes. */
+        const val SOFT_FLUSH_MS = 5 * 60_000L
     }
 
     @Serializable

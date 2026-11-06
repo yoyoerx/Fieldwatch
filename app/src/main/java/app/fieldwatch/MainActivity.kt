@@ -56,7 +56,7 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
         if ((application as FieldwatchApp).pendingCrash != null) return
-        intent.getStringExtra(Alerter.EXTRA_DEVICE_KEY)?.let { vm.select(it) }
+        intent.getStringExtra(Alerter.EXTRA_DEVICE_KEY)?.let { openFromNote(it) }
     }
 
     private fun showCrashNote(app: FieldwatchApp) {
@@ -88,7 +88,12 @@ class MainActivity : ComponentActivity() {
         if (RadioPermissions.granted(this)) {
             lifecycleScope.launch { vm.startScan() }
         }
-        intent?.getStringExtra(Alerter.EXTRA_DEVICE_KEY)?.let { vm.select(it) }
+        intent?.getStringExtra(Alerter.EXTRA_DEVICE_KEY)?.let { openFromNote(it) }
+    }
+
+    /** A radio that has left the live list still opens from its places record. */
+    private fun openFromNote(key: String) {
+        if (!vm.openPlaceRadio(key)) vm.select(key)
     }
 
     private fun copyNote(text: String) {

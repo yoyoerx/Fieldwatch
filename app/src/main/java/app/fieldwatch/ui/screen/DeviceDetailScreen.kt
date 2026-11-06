@@ -365,6 +365,40 @@ fun DeviceDetailScreen(
                     }
                 }
             }
+            if (canName) {
+                var familiarOn by remember(device.key) { mutableStateOf(vm.isFamiliar(device.key)) }
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surface,
+                    tonalElevation = 1.dp,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Row(
+                        Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                LanguageText.text("place.known"),
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Text(
+                                LanguageText.text("place.known.note"),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        FieldwatchSwitch(
+                            checked = familiarOn,
+                            onCheckedChange = { on ->
+                                vm.setRadioFamiliar(device, on)
+                                familiarOn = on
+                            },
+                        )
+                    }
+                }
+            }
             if (device.kind == RadioKind.WIFI) {
                 TrustNetworkControl(device, vm)
             }

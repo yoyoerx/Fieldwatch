@@ -671,6 +671,8 @@ data class WatchTarget(
     val observerNotes: String = "",
     /** This radio is the operator's. Missing JSON = off. Alert is left as last set. */
     val mine: Boolean = false,
+    /** Someone the operator knows, like a coworker or a neighbor. Off the places report and its warning. */
+    val familiar: Boolean = false,
 )
 
 /**
@@ -1268,9 +1270,13 @@ data class AppSettings(
     val tagLocation: Boolean = true,
     /**
      * Remember a stable tracker heard at two or more places, and a return after
-     * a quiet stretch. Ordinary Wi-Fi and Bluetooth stay out. Missing JSON is on.
+     * a quiet stretch. [placeWide] adds fixed-address Bluetooth and Wi-Fi. Missing JSON is on.
      */
     val placeWatch: Boolean = true,
+    /** Places also keeps fixed-address Bluetooth and Wi-Fi access points, not only tags. */
+    val placeWide: Boolean = true,
+    /** Warn when a radio that is not Mine reaches this many stops in one day. 0 is off. */
+    val placeAlertStops: Int = 3,
     /** Reverse-geocode GPS stamps in Debrief when the phone is online. Default on. */
     val onlineLookup: Boolean = true,
     /** Which raster [onlineLookup] loads. Missing JSON is OpenStreetMap. Turning maps off keeps this. */
