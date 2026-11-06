@@ -41,6 +41,7 @@ import app.fieldwatch.ui.component.DecodeGlyph
 import app.fieldwatch.ui.component.NoticeBody
 import app.fieldwatch.ui.component.FieldwatchSwitch
 import app.fieldwatch.ui.component.FieldwatchFilterChip
+import app.fieldwatch.ui.component.LiveCellCard
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Notes
 import androidx.compose.material.icons.outlined.Notifications
@@ -859,6 +860,7 @@ private fun ClassOutlineView(
                     modifier = Modifier.padding(24.dp),
                 )
             }
+            item(key = "live-cell") { LiveCellCard(vm) }
             return@LazyColumn
         }
         item(key = "outline-summary") {
@@ -948,6 +950,7 @@ private fun ClassOutlineView(
                 }
             }
         }
+        item(key = "live-cell") { LiveCellCard(vm) }
     }
 }
 
@@ -1613,6 +1616,7 @@ private fun RankedList(
         items(devices, key = { it.key }) { device ->
             DeviceRow(device, vm, sparklines, compact, onOpen, sort, windowMs, showBar, showNewAge, showFleet, showFrequency, showSeenTimes, now, highlighted = device.key in flashKeys, titleLine = titleLine, subtitleLine = subtitleLine, demoMode = demoMode, alerted = device.key in alertedKeys)
         }
+        item(key = "live-cell") { LiveCellCard(vm) }
     }
 }
 
@@ -2096,6 +2100,7 @@ private fun TimelineView(
                 }
             }
         }
+        item(key = "live-cell") { LiveCellCard(vm) }
     }
 }
 

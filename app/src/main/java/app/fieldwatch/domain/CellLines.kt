@@ -129,5 +129,17 @@ internal object CellLines {
         en("cell.flag.loud.new", "New cell, much louder than usual", LanguageSlot.CONTROL),
         en("cell.flag.close.new", "New cell, zero timing advance", LanguageSlot.CONTROL),
         en("cell.flag.lone", "No neighbor cells on 4G or 5G", LanguageSlot.CONTROL),
+        en("live.cell.title", "This phone's cell", LanguageSlot.CONTROL),
+        en("live.cell.connected", "Connected", LanguageSlot.CONTROL),
+        en("live.cell.detected", "Detected nearby: {n}", LanguageSlot.CONTROL),
+        en(
+            "live.cell.none",
+            "No connected cell reported yet. Android lists cells only with location on.",
+            LanguageSlot.BODY,
+        ),
+        en("live.cell.empty", "Not returned: {fields}", LanguageSlot.BODY),
+        en("live.cell.more", "{n} more", LanguageSlot.CONTROL),
+        en("live.cell.km", "about {km} km", LanguageSlot.CONTROL),
+        en("live.cell.watch.off", "Suspicion score needs Monitor the cell connection.", LanguageSlot.BODY),
     )
 }

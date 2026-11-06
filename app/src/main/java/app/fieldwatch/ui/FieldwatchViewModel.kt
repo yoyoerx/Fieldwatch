@@ -431,6 +431,10 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
     val cellBook = app.cells.bookFlow
         .stateIn(viewModelScope, SharingStarted.Eagerly, CellBook())
 
+    /** Latest cached cell reading and its score, for the card at the bottom of Live. */
+    val cellReading: StateFlow<app.fieldwatch.domain.CellReading> = app.cells.reading
+    val cellVerdict: StateFlow<app.fieldwatch.domain.CellVerdict> = app.cells.verdict
+
     fun learnCell(episodeId: Long) {
         app.cells.learn(episodeId, System.currentTimeMillis())
         app.announceCell()

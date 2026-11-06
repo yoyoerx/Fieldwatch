@@ -1791,6 +1791,14 @@
     "cell.flag.odd.channel": "Channel outside every known band",
     "cell.flag.loud.new": "New cell, much louder than usual",
     "cell.flag.close.new": "New cell, zero timing advance",
-    "cell.flag.lone": "No neighbor cells on 4G or 5G"
+    "cell.flag.lone": "No neighbor cells on 4G or 5G",
+    "live.cell.title": "This phone's cell",
+    "live.cell.connected": "Connected",
+    "live.cell.detected": "Detected nearby: {n}",
+    "live.cell.none": "No connected cell reported yet. Android lists cells only with location on.",
+    "live.cell.empty": "Not returned: {fields}",
+    "live.cell.more": "{n} more",
+    "live.cell.km": "about {km} km",
+    "live.cell.watch.off": "Suspicion score needs Monitor the cell connection."
   }
 }
