@@ -68,7 +68,9 @@ android {
             }
         }
         debug {
-            applicationIdSuffix = ""
+            // Personal build, signed with this machine's debug key: installs beside the official app.
+            applicationIdSuffix = ".custom"
+            versionNameSuffix = "-custom"
             isDebuggable = false
             isMinifyEnabled = true
             isShrinkResources = true
